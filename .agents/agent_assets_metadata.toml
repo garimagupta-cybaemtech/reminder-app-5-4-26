@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "rNGIv6saRtzgCv_qjQwME"
+uri = "file://artifacts/reminder-app/assets/images/icon.png"
+type = "image"
+title = "reminder app icon"

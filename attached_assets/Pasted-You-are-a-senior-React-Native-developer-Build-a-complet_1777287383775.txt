@@ -1,0 +1,119 @@
+You are a senior React Native developer.
+
+Build a complete Reminder & Task Management mobile app using React Native (Expo preferred).
+
+### Core Requirements:
+
+1. 📅 Calendar UI
+- Monthly calendar view like Google Calendar
+- Select a date → show tasks for that date below
+- Highlight selected date
+- Scrollable month navigation
+
+2. 📝 Task Creation
+- Add task via:
+  - Text input
+  - Voice recording (convert speech to text using expo-speech or speech-to-text API)
+- When saved → task should be attached to selected date
+
+3. 🔔 Reminder Options
+- User can choose:
+  - Today
+  - Tomorrow
+  - Day after tomorrow
+- Custom date picker also allowed
+
+4. ⏰ Alarm + Snooze
+- Trigger local notification alarm
+- Snooze options:
+  - 5 min
+  - 10 min
+  - 15 min
+- Use expo-notifications
+- Alarm should behave like real alarm (repeat until dismissed or snoozed)
+
+5. 📍 Visit Location
+- Add optional "Visit Location"
+- Use Google Places API or simple text input
+- Store location in task
+
+6. 🏷️ Filters (Top Tabs)
+- Travel
+- Meeting
+- Block Time (PTO)
+- All
+- Filter tasks based on category
+
+7. 💾 Storage
+- Use local JSON database (AsyncStorage)
+- Structure example:
+
+{
+  "tasks": [
+    {
+      "id": "uuid",
+      "title": "Client Meeting",
+      "date": "2026-04-23",
+      "time": "10:00",
+      "category": "Meeting",
+      "voiceNote": "file_uri",
+      "location": "Pune Office",
+      "reminder": "Today",
+      "alarm": true
+    }
+  ]
+}
+
+8. 📱 UI Requirements
+- Clean modern UI (Google Calendar inspired)
+- Floating "+" button to add task
+- Bottom tabs:
+  - Activity
+  - Chat
+  - Calendar
+  - Calls
+  - Files
+  - More
+
+9. 🔍 Features
+- Search tasks
+- Mark task as completed
+- Cancel task (strike-through UI)
+
+10. ⚙️ Tech Stack
+- React Native (Expo)
+- AsyncStorage (JSON storage)
+- expo-notifications (alarm)
+- expo-av (voice recording)
+- react-native-calendars (calendar UI)
+- react-navigation
+
+---
+
+### Folder Structure:
+
+/src
+  /components
+  /screens
+  /utils
+  /services
+  /storage
+
+---
+
+### Deliverables:
+- Full working code
+- Reusable components
+- Proper state management using Context API or Zustand
+- Clean and scalable code
+
+---
+
+### Bonus:
+- Add dark mode
+- Add swipe to delete
+- Add recurring tasks (daily/weekly)
+
+---
+
+Now generate full project step by step with code.
