@@ -7,7 +7,6 @@ import {
   FlatList,
   Platform,
   Pressable,
-  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -39,6 +38,26 @@ function monthLabel(ymd: string): string {
     month: "long",
     year: "numeric",
   });
+}
+
+function toUserId(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function getParticipants(task: Task): string[] {
+  const raw = [
+    ...(Array.isArray(task.participants) ? task.participants : []),
+    ...(Array.isArray(task.participantUserIds) ? task.participantUserIds : []),
+  ];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    const id = toUserId(item);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
 }
 
 export default function HomeScreen() {
@@ -75,20 +94,17 @@ export default function HomeScreen() {
     () => tasksForDate(selectedDate, filter, search),
     [tasksForDate, selectedDate, filter, search],
   );
-  const blockTimeSections = useMemo(() => {
-    const mine = dayTasks.filter((t) => {
-      const participants = Array.from(new Set(t.participantUserIds ?? [user?.id ?? ""])).filter(Boolean);
-      return t.ownerUserId === user?.id && participants.length === 1 && participants[0] === user?.id;
+  const blockTimeSourceTasks = useMemo(
+    () => tasksForDate(selectedDate, "All", search),
+    [tasksForDate, selectedDate, search],
+  );
+  const sharedBlockTimeTasks = useMemo(() => {
+    const currentUserId = toUserId(user?.id);
+    return blockTimeSourceTasks.filter((t) => {
+      const participants = getParticipants(t);
+      return participants.length > 1 && participants.includes(currentUserId);
     });
-    const common = dayTasks.filter((t) => {
-      const participants = new Set(t.participantUserIds ?? []);
-      return participants.size > 1 && participants.has(user?.id ?? "");
-    });
-    return [
-      { title: "My Meetings", data: mine },
-      { title: "Common Meetings", data: common },
-    ];
-  }, [dayTasks, user?.id]);
+  }, [blockTimeSourceTasks, user?.id]);
 
   const stats = useMemo(() => {
     const today = todayYMD();
@@ -243,13 +259,10 @@ export default function HomeScreen() {
       </View>
 
       {filter === "Block Time" ? (
-        <SectionList
-          sections={blockTimeSections}
+        <FlatList
+          data={sharedBlockTimeTasks}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ paddingTop: 4, paddingBottom: 120 }}
-          renderSectionHeader={({ section }) => (
-            <Text style={[styles.sectionHeader, { color: c.mutedForeground }]}>{section.title}</Text>
-          )}
           renderItem={({ item }) => (
             <TaskItem
               task={item}
@@ -266,7 +279,6 @@ export default function HomeScreen() {
               subtitle={search ? "Try a different keyword." : "Tap the + button to add your first task."}
             />
           }
-          stickySectionHeadersEnabled={false}
         />
       ) : (
         <FlatList
@@ -452,13 +464,4 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   filterText: { fontSize: 13, fontWeight: "600" },
-  sectionHeader: {
-    fontSize: 12,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
 });

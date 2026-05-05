@@ -20,7 +20,7 @@ interface OrganizationContextValue {
 const OrganizationContext = createContext<OrganizationContextValue | null>(null);
 
 export function OrganizationProvider({ children }: { children: React.ReactNode }) {
-  const { user, users } = useAuth();
+  const { user, users, updateUserOrgId } = useAuth();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -57,8 +57,9 @@ export function OrganizationProvider({ children }: { children: React.ReactNode }
       createdAt: Date.now(),
     };
     await persist([nextOrg, ...organizations]);
+    await updateUserOrgId(user.id, nextOrg.id);
     return { ok: true as const };
-  }, [organization, organizations, persist, user?.id]);
+  }, [organization, organizations, persist, updateUserOrgId, user?.id]);
 
   const joinOrganization = useCallback(async (organizationId: string) => {
     if (!user) return { ok: false as const, error: "Sign in required." };
@@ -74,8 +75,9 @@ export function OrganizationProvider({ children }: { children: React.ReactNode }
         : org,
     );
     await persist(next);
+    await updateUserOrgId(user.id, target.id);
     return { ok: true as const };
-  }, [organization, organizations, persist, user?.id]);
+  }, [organization, organizations, persist, updateUserOrgId, user?.id]);
 
   const addMember = useCallback(async (userId: string) => {
     if (!user || !organization) return { ok: false as const, error: "Organization not found." };

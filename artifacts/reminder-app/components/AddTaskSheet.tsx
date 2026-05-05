@@ -48,6 +48,20 @@ interface Props {
 const REMINDERS: ReminderPreset[] = ["Today", "Tomorrow", "Day after tomorrow", "Custom"];
 const RECURRING: Recurring[] = ["None", "Daily", "Weekly"];
 
+function normalizeMemberIds(ids: unknown[], currentUserId?: string): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const raw of ids) {
+    const id = String(raw ?? "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    normalized.push(id);
+  }
+  const me = String(currentUserId ?? "").trim();
+  if (me && !seen.has(me)) normalized.unshift(me);
+  return normalized;
+}
+
 export function AddTaskSheet({ visible, onClose, defaultDate, taskToEdit }: Props) {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -90,7 +104,15 @@ export function AddTaskSheet({ visible, onClose, defaultDate, taskToEdit }: Prop
         setRecurring(taskToEdit.recurring);
         setVoiceNote(taskToEdit.voiceNote);
         setShowCustomDate(true);
-        setSelectedMemberIds(taskToEdit.participantUserIds ?? (user ? [user.id] : []));
+        setSelectedMemberIds(
+          normalizeMemberIds(
+            [
+              ...(taskToEdit.participants ?? []),
+              ...(taskToEdit.participantUserIds ?? []),
+            ],
+            user?.id,
+          ),
+        );
       } else {
         setTitle("");
         setNotes("");
@@ -105,7 +127,7 @@ export function AddTaskSheet({ visible, onClose, defaultDate, taskToEdit }: Prop
         setRecurring("None");
         setVoiceNote(undefined);
         setShowCustomDate(false);
-        setSelectedMemberIds(user ? [user.id] : []);
+        setSelectedMemberIds(normalizeMemberIds([], user?.id));
       }
       voice.reset();
       const today = todayYMD();
@@ -149,6 +171,7 @@ export function AddTaskSheet({ visible, onClose, defaultDate, taskToEdit }: Prop
     if (Platform.OS !== "web") {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
+    const normalizedParticipants = normalizeMemberIds(selectedMemberIds, user?.id);
     if (taskToEdit) {
       await updateTask(taskToEdit.id, {
         title: title.trim(),
@@ -163,7 +186,8 @@ export function AddTaskSheet({ visible, onClose, defaultDate, taskToEdit }: Prop
         alarmTone: alarm ? settings.alarmTone : undefined,
         snoozeMinutes,
         recurring,
-        participantUserIds: Array.from(new Set(selectedMemberIds)),
+        participants: normalizedParticipants,
+        participantUserIds: normalizedParticipants,
         completed: false,
         cancelled: false,
       });
@@ -181,7 +205,7 @@ export function AddTaskSheet({ visible, onClose, defaultDate, taskToEdit }: Prop
         alarmTone: alarm ? settings.alarmTone : undefined,
         snoozeMinutes,
         recurring,
-        memberUserIds: Array.from(new Set(selectedMemberIds)),
+        memberUserIds: normalizedParticipants,
       });
     }
     onClose();

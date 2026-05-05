@@ -1,133 +1,117 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-import { clearSession, loadSessionUserId, loadUsers, saveSessionUserId, saveUsers } from "@/storage/authStorage";
+import {
+  loginWithEmail,
+  logoutFromFirebase,
+  onAuthChanged,
+  signupWithEmail,
+  subscribeAllUsers,
+  upsertUserProfile,
+} from "@/services/auth";
 import type { User } from "@/types";
-import { genId } from "@/utils/dates";
-
-const DEFAULT_USERS: User[] = [
-  {
-    id: "u-alice",
-    username: "alice",
-    password: "alice123",
-    name: "Alice Johnson",
-    color: "#1a73e8",
-  },
-  {
-    id: "u-bob",
-    username: "bob",
-    password: "bob123",
-    name: "Bob Martinez",
-    color: "#e8710a",
-  },
-  {
-    id: "u-carol",
-    username: "carol",
-    password: "carol123",
-    name: "Carol Singh",
-    color: "#7627bb",
-  },
-  {
-    id: "u-david",
-    username: "david",
-    password: "david123",
-    name: "David Park",
-    color: "#16a765",
-  },
-];
 
 interface AuthContextValue {
   user: User | null;
   users: User[];
   rememberedUser: User | null;
   loading: boolean;
-  login: (username: string, password: string) => { ok: true } | { ok: false; error: string };
-  signup: (input: { name: string; username: string; password: string }) => { ok: true } | { ok: false; error: string };
-  continueWithRememberedSession: () => { ok: true } | { ok: false; error: string };
+  login: (email: string, password: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  signup: (input: { name: string; email: string; password: string }) => Promise<{ ok: true } | { ok: false; error: string }>;
+  continueWithRememberedSession: () => Promise<{ ok: true } | { ok: false; error: string }>;
   logout: () => Promise<void>;
+  updateUserOrgId: (userId: string, orgId: string | null) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function normalizeAuthError(error: unknown): string {
+  const code = String((error as { code?: string })?.code ?? "");
+  if (code.includes("auth/invalid-email")) return "Invalid email address.";
+  if (code.includes("auth/email-already-in-use")) return "Email already in use.";
+  if (code.includes("auth/weak-password")) return "Password is too weak.";
+  if (code.includes("auth/invalid-credential") || code.includes("auth/user-not-found") || code.includes("auth/wrong-password")) {
+    return "Invalid email or password.";
+  }
+  return String((error as { message?: string })?.message ?? "Authentication failed.");
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
-  const [rememberedUser, setRememberedUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let mounted = true;
-    Promise.all([loadUsers(), loadSessionUserId()]).then(([savedUsers, id]) => {
-      if (!mounted) return;
-      const allUsers = savedUsers.length ? savedUsers : DEFAULT_USERS;
-      setUsers(allUsers);
-      if (!savedUsers.length) {
-        saveUsers(allUsers).catch(() => undefined);
-      }
-      if (id) {
-        const u = allUsers.find((x) => x.id === id) ?? null;
-        setRememberedUser(u);
-      }
-      setLoading(false);
-    });
+    const unsubscribeAuth = onAuthChanged(
+      (nextUser) => {
+        setUser(nextUser);
+        setLoading(false);
+      },
+      () => {
+        setLoading(false);
+      },
+    );
+    const unsubscribeUsers = subscribeAllUsers(
+      (nextUsers) => setUsers(nextUsers),
+      () => undefined,
+    );
     return () => {
-      mounted = false;
+      unsubscribeAuth();
+      unsubscribeUsers();
     };
   }, []);
 
-  const login = useCallback((username: string, password: string) => {
-    const u = users.find(
-      (x) => x.username.toLowerCase() === username.trim().toLowerCase(),
-    );
-    if (!u) return { ok: false as const, error: "User not found." };
-    if (u.password !== password) return { ok: false as const, error: "Wrong password." };
-    setUser(u);
-    setRememberedUser(u);
-    saveSessionUserId(u.id).catch(() => undefined);
-    return { ok: true as const };
-  }, [users]);
-
-  const signup = useCallback((input: { name: string; username: string; password: string }) => {
-    const username = input.username.trim().toLowerCase();
-    const name = input.name.trim();
-    if (!name) return { ok: false as const, error: "Name is required." };
-    if (!username) return { ok: false as const, error: "Username is required." };
-    if (input.password.length < 4) return { ok: false as const, error: "Password must be at least 4 characters." };
-    if (users.some((u) => u.username.toLowerCase() === username)) {
-      return { ok: false as const, error: "Username already taken." };
+  const login = useCallback(async (email: string, password: string) => {
+    try {
+      await loginWithEmail(email, password);
+      return { ok: true as const };
+    } catch (error) {
+      return { ok: false as const, error: normalizeAuthError(error) };
     }
-    const palette = ["#1a73e8", "#e8710a", "#7627bb", "#16a765", "#d93025", "#0b8043"];
-    const newUser: User = {
-      id: `u-${genId()}`,
-      username,
-      password: input.password,
-      name,
-      color: palette[users.length % palette.length],
-    };
-    const nextUsers = [...users, newUser];
-    setUsers(nextUsers);
-    setUser(newUser);
-    setRememberedUser(newUser);
-    saveUsers(nextUsers).catch(() => undefined);
-    saveSessionUserId(newUser.id).catch(() => undefined);
-    return { ok: true as const };
-  }, [users]);
+  }, []);
 
-  const continueWithRememberedSession = useCallback(() => {
-    if (!rememberedUser) return { ok: false as const, error: "No saved session." };
-    setUser(rememberedUser);
-    saveSessionUserId(rememberedUser.id).catch(() => undefined);
-    return { ok: true as const };
-  }, [rememberedUser]);
+  const signup = useCallback(async (input: { name: string; email: string; password: string }) => {
+    const name = input.name.trim();
+    const email = input.email.trim().toLowerCase();
+    if (!name) return { ok: false as const, error: "Name is required." };
+    if (!email) return { ok: false as const, error: "Email is required." };
+    if (input.password.length < 6) return { ok: false as const, error: "Password must be at least 6 characters." };
+    try {
+      await signupWithEmail({ name, email, password: input.password });
+      return { ok: true as const };
+    } catch (error) {
+      return { ok: false as const, error: normalizeAuthError(error) };
+    }
+  }, []);
+
+  const continueWithRememberedSession = useCallback(async () => {
+    if (user) return { ok: true as const };
+    return { ok: false as const, error: "No saved session." };
+  }, [user]);
 
   const logout = useCallback(async () => {
-    await clearSession();
-    setUser(null);
-    setRememberedUser(null);
+    await logoutFromFirebase();
+  }, []);
+
+  const updateUserOrgId = useCallback(async (userId: string, orgId: string | null) => {
+    const uid = userId.trim();
+    if (!uid) return;
+    await upsertUserProfile(uid, { orgId: orgId ?? null });
+    setUser((prev) => (prev && prev.id === uid ? { ...prev, orgId: orgId ?? null } : prev));
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, users, rememberedUser, loading, login, signup, continueWithRememberedSession, logout }),
-    [user, users, rememberedUser, loading, login, signup, continueWithRememberedSession, logout],
+    () => ({
+      user,
+      users,
+      rememberedUser: user,
+      loading,
+      login,
+      signup,
+      continueWithRememberedSession,
+      logout,
+      updateUserOrgId,
+    }),
+    [user, users, loading, login, signup, continueWithRememberedSession, logout, updateUserOrgId],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -138,3 +122,4 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
   return ctx;
 }
+

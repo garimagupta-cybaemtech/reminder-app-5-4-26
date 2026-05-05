@@ -12,6 +12,7 @@ import {
   scheduleTaskAlarm,
 } from "@/services/notifications";
 import { startLoopingTone, stopTone } from "@/services/sounds";
+import { addTaskToFirestore, subscribeToUserTasks, type FirestoreTaskRecord } from "@/services/firestoreTasks";
 import { hasSeededFor, keyFor, loadTasks, markSeeded, saveTasks } from "@/storage/taskStorage";
 import type { Category, FilterTab, Recurring, ReminderPreset, Task } from "@/types";
 import { addDaysYMD, genId, parseYMD, todayYMD } from "@/utils/dates";
@@ -58,6 +59,90 @@ const CATEGORY_COLORS: Record<Category, string> = {
   "Block Time": "#7627bb",
   Other: "#16a765",
 };
+
+function normalizeUserId(value: unknown): string | null {
+  if (value == null) return null;
+  const normalized = String(value).trim();
+  return normalized ? normalized : null;
+}
+
+function normalizeParticipants(input: unknown[], creatorId?: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    const id = normalizeUserId(raw);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  const creator = normalizeUserId(creatorId);
+  if (creator && !seen.has(creator)) out.unshift(creator);
+  return out;
+}
+
+function normalizeTaskOwnership(task: Task, fallbackUserId?: string): Task {
+  const creator =
+    normalizeUserId(task.createdBy) ??
+    normalizeUserId(task.ownerUserId) ??
+    normalizeUserId(fallbackUserId) ??
+    undefined;
+  const participants = normalizeParticipants(
+    [
+      ...(Array.isArray(task.participants) ? task.participants : []),
+      ...(Array.isArray(task.participantUserIds) ? task.participantUserIds : []),
+    ],
+    creator,
+  );
+  return {
+    ...task,
+    createdBy: creator,
+    ownerUserId: creator,
+    participants,
+    participantUserIds: participants,
+  };
+}
+
+function toIdArray(input: unknown): unknown[] {
+  return Array.isArray(input) ? input : [];
+}
+
+function toReminderCategory(category?: string): Category {
+  if (category === "Travel" || category === "Meeting" || category === "Block Time" || category === "Other") {
+    return category;
+  }
+  return "Other";
+}
+
+function toRecurring(repeat?: string): Recurring {
+  if (repeat === "Daily" || repeat === "Weekly" || repeat === "None") return repeat;
+  return "None";
+}
+
+function fromFirestoreTask(record: FirestoreTaskRecord): Task {
+  const createdBy = normalizeUserId(record.createdBy) ?? undefined;
+  const participants = normalizeParticipants(record.participants ?? [], createdBy);
+  return {
+    id: record.id,
+    title: record.title || "Untitled",
+    notes: record.notes,
+    date: record.date,
+    time: record.time,
+    category: toReminderCategory(record.category),
+    location: record.location,
+    reminder: "Custom",
+    alarm: !!record.alarmEnabled,
+    alarmTone: record.alarmTone,
+    snoozeMinutes: record.snoozeMinutes,
+    completed: false,
+    cancelled: false,
+    recurring: toRecurring(record.repeat),
+    createdBy,
+    participants,
+    ownerUserId: createdBy,
+    participantUserIds: participants,
+    createdAt: record.createdAt || Date.now(),
+  };
+}
 
 function expandRecurring(task: Task, date: string): Task | null {
   if (task.date === date) return task;
@@ -227,7 +312,16 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       const hydrateWithAlarms = async (input: Task[]) => {
         let changed = false;
         const next: Task[] = [];
-        for (const task of input) {
+        for (const rawTask of input) {
+          const task = normalizeTaskOwnership(rawTask, user?.id);
+          if (
+            task.createdBy !== rawTask.createdBy ||
+            task.ownerUserId !== rawTask.ownerUserId ||
+            JSON.stringify(task.participants ?? []) !== JSON.stringify(rawTask.participants ?? []) ||
+            JSON.stringify(task.participantUserIds ?? []) !== JSON.stringify(rawTask.participantUserIds ?? [])
+          ) {
+            changed = true;
+          }
           if (
             task.alarm &&
             !task.cancelled &&
@@ -282,6 +376,41 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       saveTasks(user.id, tasks).catch(() => undefined);
     }
   }, [tasks, loaded, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return () => undefined;
+    const unsubscribe = subscribeToUserTasks(
+      user.id,
+      (remoteTasks) => {
+        setTasks((prev) => {
+          const localById = new Map(prev.map((t) => [t.id, t]));
+          const remoteMapped = remoteTasks.map(fromFirestoreTask).map((remote) => {
+            const existing = localById.get(remote.id);
+            if (!existing) return remote;
+            return normalizeTaskOwnership(
+              {
+                ...remote,
+                notificationId: existing.notificationId,
+                snoozedUntil: existing.snoozedUntil,
+                ringing: existing.ringing,
+                repeatingNotificationId: existing.repeatingNotificationId,
+                completed: existing.completed,
+                cancelled: existing.cancelled,
+              },
+              user.id,
+            );
+          });
+          const remoteIds = new Set(remoteMapped.map((t) => t.id));
+          const localOnly = prev.filter((t) => !remoteIds.has(t.id));
+          return [...remoteMapped, ...localOnly].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+        });
+      },
+      () => undefined,
+    );
+    return () => {
+      unsubscribe();
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     tasksRef.current = tasks;
@@ -413,7 +542,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   const addTask = useCallback(async (input: NewTaskInput) => {
     if (!user) return;
-    const participantUserIds = Array.from(new Set([user.id, ...(input.memberUserIds ?? [])]));
+    const participantUserIds = normalizeParticipants([user.id, ...(input.memberUserIds ?? [])], user.id);
     const sharedGroupId = participantUserIds.length > 1 ? genId() : undefined;
     let notificationId: string | undefined;
     const taskId = genId();
@@ -442,6 +571,8 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       snoozeMinutes: input.snoozeMinutes,
       ringing: false,
       recurring: input.recurring,
+      createdBy: user.id,
+      participants: participantUserIds,
       ownerUserId: user.id,
       participantUserIds,
       sharedGroupId,
@@ -451,6 +582,21 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       createdAt: Date.now(),
     };
     setTasks((prev) => [newTask, ...prev]);
+    addTaskToFirestore({
+      taskId: taskId,
+      title: input.title,
+      notes: input.notes,
+      category: input.category,
+      date: input.date,
+      time: input.time,
+      location: input.location,
+      repeat: input.recurring,
+      alarmEnabled: input.alarm,
+      alarmTone: input.alarmTone,
+      snoozeMinutes: input.snoozeMinutes,
+      createdBy: user.id,
+      participants: participantUserIds,
+    }).catch(() => undefined);
     const otherMemberIds = participantUserIds.filter((id) => id !== user.id);
     if (otherMemberIds.length === 0) return;
 
@@ -463,6 +609,16 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         repeatingNotificationId: undefined,
         ringing: false,
       };
+      if (memberTask.alarm && !memberTask.cancelled && !memberTask.completed) {
+        memberTask.notificationId = await scheduleTaskAlarm({
+          taskId: memberTask.id,
+          title: memberTask.title,
+          notes: memberTask.notes,
+          date: memberTask.date,
+          time: memberTask.time,
+          alarmTone: memberTask.alarmTone,
+        });
+      }
       const deduped = memberTasks.filter((t) => t.sharedGroupId !== sharedGroupId);
       deduped.unshift(memberTask);
       await saveRawTasksForUser(memberId, deduped);
@@ -478,15 +634,25 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     if (existing.repeatingNotificationId) {
       await cancelNotification(existing.repeatingNotificationId);
     }
-    const resolvedParticipants = Array.from(
-      new Set(patch.participantUserIds ?? existing.participantUserIds ?? [existing.ownerUserId ?? user?.id ?? ""]),
-    ).filter(Boolean);
+    const resolvedCreator = normalizeUserId(patch.createdBy) ?? normalizeUserId(existing.createdBy) ?? normalizeUserId(existing.ownerUserId) ?? normalizeUserId(user?.id) ?? undefined;
+    const resolvedParticipants = normalizeParticipants(
+      [
+        ...toIdArray(patch.participants),
+        ...toIdArray(patch.participantUserIds),
+        ...toIdArray(existing.participants),
+        ...toIdArray(existing.participantUserIds),
+      ],
+      resolvedCreator,
+    );
     const resolvedSharedGroupId =
       existing.sharedGroupId ?? (resolvedParticipants.length > 1 ? genId() : undefined);
 
     const merged: Task = {
       ...existing,
       ...patch,
+      createdBy: resolvedCreator,
+      ownerUserId: resolvedCreator,
+      participants: resolvedParticipants,
       participantUserIds: resolvedParticipants,
       sharedGroupId: resolvedSharedGroupId,
       notificationId: undefined,
@@ -508,12 +674,21 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     setTasks((prev) =>
       prev.map((t) => (t.id === id ? { ...merged, notificationId: nextNotificationId } : t)),
     );
-    const previousParticipants = Array.from(new Set(existing.participantUserIds ?? [existing.ownerUserId ?? user?.id ?? ""])).filter(Boolean);
+    const previousParticipants = normalizeParticipants(
+      [
+        ...toIdArray(existing.participants),
+        ...toIdArray(existing.participantUserIds),
+      ],
+      existing.createdBy ?? existing.ownerUserId ?? user?.id,
+    );
     const nextParticipants = resolvedParticipants;
 
     await syncSharedAcrossUsers(resolvedSharedGroupId, previousParticipants, (memberTask) => ({
       ...memberTask,
       ...patch,
+      createdBy: resolvedCreator,
+      ownerUserId: resolvedCreator,
+      participants: nextParticipants,
       participantUserIds: nextParticipants,
       snoozedUntil: undefined,
       ringing: false,
@@ -524,12 +699,25 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       const memberTasks = await loadRawTasksForUser(memberId);
       const memberTask: Task = {
         ...merged,
+        createdBy: resolvedCreator,
+        ownerUserId: resolvedCreator,
+        participants: nextParticipants,
         participantUserIds: nextParticipants,
         id: genId(),
         notificationId: undefined,
         repeatingNotificationId: undefined,
         ringing: false,
       };
+      if (memberTask.alarm && !memberTask.cancelled && !memberTask.completed) {
+        memberTask.notificationId = await scheduleTaskAlarm({
+          taskId: memberTask.id,
+          title: memberTask.title,
+          notes: memberTask.notes,
+          date: memberTask.date,
+          time: memberTask.time,
+          alarmTone: memberTask.alarmTone,
+        });
+      }
       const deduped = memberTasks.filter((t) => t.sharedGroupId !== resolvedSharedGroupId);
       deduped.unshift(memberTask);
       await saveRawTasksForUser(memberId, deduped);

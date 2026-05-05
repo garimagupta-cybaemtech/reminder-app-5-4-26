@@ -1,4 +1,4 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
+import { Feather } from "@expo/vector-icons";
 import React from "react";
 import {
   Alert,
@@ -33,6 +33,26 @@ export function TaskDetailsModal({ task, onClose, onEdit }: Props) {
 
   const accent = CATEGORY_COLORS[task.category];
   const tone = task.alarmTone ? TONES.find((t) => t.id === task.alarmTone) : undefined;
+  const participants = Array.from(
+    new Set([
+      ...(Array.isArray(task.participants) ? task.participants : []),
+      ...(Array.isArray(task.participantUserIds) ? task.participantUserIds : []),
+    ].map((v) => String(v ?? "").trim()).filter(Boolean)),
+  );
+
+  const notesValue = task.notes?.trim() ? task.notes.trim() : "No notes";
+  const categoryValue = task.category || "None";
+  const locationValue = task.location?.trim() ? task.location.trim() : "None";
+  const repeatValue = task.recurring || "None";
+  const alarmValue = task.alarm ? "On" : "Off";
+  const toneValue = tone ? `${tone.emoji} ${tone.name}` : "None";
+  const snoozeValue =
+    typeof task.snoozeMinutes === "number"
+      ? task.snoozeMinutes >= 60
+        ? `${Math.round(task.snoozeMinutes / 60)}h`
+        : `${task.snoozeMinutes} min`
+      : "None";
+  const participantsValue = participants.length ? participants.join(", ") : "None";
 
   function formatTimestamp(ts: number): string {
     const d = new Date(ts);
@@ -96,7 +116,7 @@ export function TaskDetailsModal({ task, onClose, onEdit }: Props) {
           <View style={styles.header}>
             <View style={[styles.categoryDot, { backgroundColor: accent }]} />
             <Text style={[styles.headerCategory, { color: accent }]}>
-              {task.category}
+              {categoryValue}
             </Text>
             <View style={{ flex: 1 }} />
             <TouchableOpacity onPress={onClose} hitSlop={8}>
@@ -122,9 +142,8 @@ export function TaskDetailsModal({ task, onClose, onEdit }: Props) {
             </Text>
 
             <View style={[styles.divider, { backgroundColor: c.border }]} />
-            {task.notes ? (
-              <DetailRow icon="file-text" label="Notes" value={task.notes} />
-            ) : null}
+            <DetailRow icon="file-text" label="Notes" value={notesValue} />
+            <DetailRow icon="tag" label="Category" value={categoryValue} />
 
             <DetailRow
               icon="calendar"
@@ -136,42 +155,12 @@ export function TaskDetailsModal({ task, onClose, onEdit }: Props) {
               label="Time"
               value={formatTimeDisplay(task.time)}
             />
-            {task.location ? (
-              <DetailRow icon="map-pin" label="Location" value={task.location} />
-            ) : null}
-            {task.recurring !== "None" ? (
-              <DetailRow icon="repeat" label="Repeat" value={task.recurring} />
-            ) : null}
-            <DetailRow
-              icon="bell"
-              label="Alarm"
-              value={task.alarm ? "On" : "Off"}
-            />
-            {task.alarm && tone ? (
-              <DetailRow
-                icon="music"
-                label="Tone"
-                value={`${tone.emoji}  ${tone.name}`}
-              />
-            ) : null}
-            {task.snoozedUntil && task.snoozedUntil > Date.now() ? (
-              <DetailRow
-                icon="clock"
-                label="Snoozed"
-                value={`Until ${formatTimestamp(task.snoozedUntil)}`}
-              />
-            ) : null}
-            {task.voiceNote ? (
-              <View style={styles.row}>
-                <Ionicons name="mic" size={16} color={c.primary} />
-                <Text style={[styles.rowLabel, { color: c.mutedForeground }]}>
-                  Voice note
-                </Text>
-                <Text style={[styles.rowValue, { color: c.foreground }]}>
-                  Saved
-                </Text>
-              </View>
-            ) : null}
+            <DetailRow icon="map-pin" label="Location" value={locationValue} />
+            <DetailRow icon="repeat" label="Repeat" value={repeatValue} />
+            <DetailRow icon="bell" label="Alarm" value={alarmValue} />
+            <DetailRow icon="music" label="Tone" value={toneValue} />
+            <DetailRow icon="clock" label="Snooze" value={snoozeValue} />
+            <DetailRow icon="users" label="Participants" value={participantsValue} />
 
             <View style={[styles.divider, { backgroundColor: c.border }]} />
 

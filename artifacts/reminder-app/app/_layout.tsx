@@ -18,6 +18,7 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { OrganizationProvider, useOrganization } from "@/context/OrganizationContext";
 import { SettingsProvider } from "@/context/SettingsContext";
 import { TaskProvider } from "@/context/TaskContext";
+import { configureFirestore } from "@/services/firebase";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -77,6 +78,10 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
+
+  useEffect(() => {
+    configureFirestore();
+  }, []);
 
   if (!fontsLoaded && !fontError) return null;
 

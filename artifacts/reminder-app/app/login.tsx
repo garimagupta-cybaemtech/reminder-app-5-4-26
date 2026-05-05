@@ -24,34 +24,34 @@ export default function LoginScreen() {
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit() {
+  async function handleSubmit() {
     setError(null);
     if (mode === "signin") {
-      const result = login(username, password);
+      const result = await login(email, password);
       if (!result.ok) setError(result.error);
       return;
     }
-    const result = signup({ name, username, password });
+    const result = await signup({ name, email, password });
     if (!result.ok) setError(result.error);
   }
 
   function fillDemo() {
     const u = users[0];
     if (!u) return;
-    setUsername(u.username);
-    setPassword(u.password);
+    setEmail(u.email);
+    setPassword("");
     setName(u.name);
     setError(null);
   }
 
-  function handleContinue() {
+  async function handleContinue() {
     setError(null);
-    const result = continueWithRememberedSession();
+    const result = await continueWithRememberedSession();
     if (!result.ok) setError(result.error);
   }
 
@@ -115,16 +115,16 @@ export default function LoginScreen() {
           ) : null}
 
           <View style={[styles.field, { backgroundColor: c.surface, borderColor: c.border }]}>
-            <Feather name="user" size={16} color={c.mutedForeground} />
-            <TextInput
-              value={username}
-              onChangeText={setUsername}
-              placeholder="Username"
+              <Feather name="mail" size={16} color={c.mutedForeground} />
+              <TextInput
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Email"
               placeholderTextColor={c.mutedForeground}
               autoCapitalize="none"
               autoCorrect={false}
               style={[styles.input, { color: c.foreground }]}
-            />
+              />
           </View>
 
           <View style={[styles.field, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -138,7 +138,9 @@ export default function LoginScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               style={[styles.input, { color: c.foreground }]}
-              onSubmitEditing={handleSubmit}
+              onSubmitEditing={() => {
+                handleSubmit().catch(() => undefined);
+              }}
             />
             <Pressable onPress={() => setShowPwd((s) => !s)} hitSlop={8}>
               <Feather name={showPwd ? "eye-off" : "eye"} size={16} color={c.mutedForeground} />
@@ -147,7 +149,7 @@ export default function LoginScreen() {
 
           {error ? <Text style={[styles.error, { color: c.destructive }]}>{error}</Text> : null}
 
-          <Pressable onPress={handleSubmit} style={[styles.signIn, { backgroundColor: c.primary }]}>
+          <Pressable onPress={() => handleSubmit().catch(() => undefined)} style={[styles.signIn, { backgroundColor: c.primary }]}>
             <Text style={styles.signInText}>{mode === "signin" ? "Sign in" : "Create account"}</Text>
           </Pressable>
 

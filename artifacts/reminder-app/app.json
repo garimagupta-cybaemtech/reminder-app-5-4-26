@@ -59,8 +59,10 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "garimagupta-cybaemtech"
-     
-    
+    "extra": {
+      "eas": {
+        "projectId": "82fd470e-4575-44e1-af0c-0de4cb50bc03"
+      }
+    }
   }
 }

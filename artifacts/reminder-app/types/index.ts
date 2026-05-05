@@ -26,6 +26,8 @@ export interface Task {
   ringing?: boolean;
   repeatingNotificationId?: string;
   recurring: Recurring;
+  createdBy?: string;
+  participants?: string[];
   ownerUserId?: string;
   participantUserIds?: string[];
   sharedGroupId?: string;
@@ -38,6 +40,9 @@ export const FILTER_TABS: FilterTab[] = ["All", "Travel", "Meeting", "Block Time
 
 export interface User {
   id: string;
+  userId: string;
+  email: string;
+  orgId: string | null;
   username: string;
   password: string;
   name: string;
